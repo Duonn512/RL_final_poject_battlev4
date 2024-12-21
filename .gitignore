@@ -1,0 +1,4 @@
+.vscode/
+.DS_Store
+/video/
+/__pycache__/
