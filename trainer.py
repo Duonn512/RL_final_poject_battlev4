@@ -5,6 +5,7 @@ import torch.optim.lr_scheduler as lr_scheduler
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
 from collections import deque
+
 from biggerDQN import DQN
 import numpy as np
 from tqdm import tqdm #Adding tqdm
@@ -42,7 +43,9 @@ class Trainer:
         self.q_network = DQN(input_shape, action_shape).to(device)
         self.target_network = DQN(input_shape, action_shape).to(device)
         self.target_network.load_state_dict(self.q_network.state_dict())
-        self.replay_buffer = ReplayBuffer(buffer_size=40*128*10)
+
+        # Buffer size dự tính được chọn sau các lần chạy trước đó
+        self.replay_buffer = ReplayBuffer(buffer_size=100000)
 
         self.criterion = nn.MSELoss()
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=lr)
@@ -67,8 +70,11 @@ class Trainer:
             q_values = self.q_network(observation)
         return torch.argmax(q_values, dim=1).item()
 
-    def train(self, episodes=100, batch_size=128):        
+    def train(self, episodes=100, batch_size=512):
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+
         episode_bar = tqdm(range(episodes), desc="Training Episodes")  # TQDM progress bar for episodes
+        self.q_network.train()
 
         for episode in episode_bar:
             self.env.reset()
@@ -77,8 +83,9 @@ class Trainer:
             reward_for_agent = {agent: 0 for agent in self.env.agents if agent.startswith('blue')}
             prev_observation = {}
             prev_action = {}
-            step = 0
-                
+            step = 0 # Để quan sát số step mỗi episode
+
+            # Vòng lặp cho 1 trận
             for agent in self.env.agent_iter():
                 step += 1
                 
@@ -100,6 +107,7 @@ class Trainer:
                         action = self.env.action_space(agent).sample()
     
                     if agent_handle == 'blue':
+                        # Thêm thông tin vào replay buffer với các agent đã action ít nhất 1 lần. 
                         if agent in prev_observation and agent in prev_action:
                             self.replay_buffer.add(
                                 prev_observation[agent],
@@ -115,8 +123,27 @@ class Trainer:
                 self.env.step(action)
             
             dataloader = DataLoader(self.replay_buffer, batch_size=batch_size, shuffle=True, drop_last=True)
-            self.update_model(dataloader)
-                
+
+            # Update trọng số mạng.
+            for states, actions, rewards, next_states, dones in dataloader:
+                states = states.to(dtype=torch.float32, device=device)
+                actions = actions.to(dtype=torch.long, device=device)
+                rewards = rewards.to(dtype=torch.float32, device=device)
+                next_states = next_states.to(dtype=torch.float32, device=device)
+                dones = dones.to(dtype=torch.float32, device=device)
+
+                current_q_values = self.q_network(states).gather(1, actions.unsqueeze(1)).squeeze(1)
+                with torch.inference_mode():
+                    next_q_values = self.target_network(next_states).max(1)[0]
+                expected_q_values = rewards + (self.gamma * next_q_values * (1 - dones))
+
+                loss = self.criterion(current_q_values, expected_q_values)
+
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
+
+            # Cập nhật trọng số cho target_network mỗi 5 episode
             if (episode + 1) % self.update_target_every == 0:
                 self.target_network.load_state_dict(self.q_network.state_dict())
                 self.steplr.step()
@@ -125,24 +152,4 @@ class Trainer:
                f"Steps={step}")
             self.epsilon = max(self.epsilon * self.epsilon_decay, self.epsilon_min)
 
-    def update_model(self, dataloader):
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.q_network.train()
-
-        for states, actions, rewards, next_states, dones in dataloader:
-            states = states.to(dtype=torch.float32, device=device)
-            actions = actions.to(dtype=torch.long, device=device)
-            rewards = rewards.to(dtype=torch.float32, device=device)
-            next_states = next_states.to(dtype=torch.float32, device=device)
-            dones = dones.to(dtype=torch.float32, device=device)
-
-            current_q_values = self.q_network(states).gather(1, actions.unsqueeze(1)).squeeze(1)
-            with torch.inference_mode():
-                next_q_values = self.target_network(next_states).max(1)[0]
-            expected_q_values = rewards + (self.gamma * next_q_values * (1 - dones))
-
-            loss = self.criterion(current_q_values, expected_q_values)
-
-            self.optimizer.zero_grad()
-            loss.backward()
-            self.optimizer.step()
+        

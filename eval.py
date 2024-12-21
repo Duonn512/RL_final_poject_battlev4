@@ -35,35 +35,22 @@ def eval():
     )
     final_q_network.to(device)
 
-
-
-
-
-    ##########################################################################
-    # Add code here to load the blue network
-    ##########################################################################
-
-    q_network_blue = DQN(
+    # Blue network and policy
+    blue_network = DQN(
         env.observation_space("blue_0").shape, env.action_space("blue_0").n
     )
-    q_network_blue.load_state_dict(
+    blue_network.load_state_dict(
         torch.load("blue.pt", weights_only=True, map_location="cpu")
     )
-    q_network_blue.to(device)
+    blue_network.to(device)
 
     def blue_policy(env, agent, obs):
         observation = (
             torch.Tensor(obs).float().permute([2, 0, 1]).unsqueeze(0).to(device)
         )
         with torch.no_grad():
-            q_values = q_network_blue(observation)
+            q_values = blue_network(observation)
         return torch.argmax(q_values, dim=1).cpu().numpy()[0]
-
-    ##########################################################################
-    # Finish
-    ##########################################################################
-
-
 
 
     def pretrain_policy(env, agent, obs):
