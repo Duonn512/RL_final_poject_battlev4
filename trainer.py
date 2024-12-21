@@ -45,12 +45,12 @@ class Trainer:
         self.target_network.load_state_dict(self.q_network.state_dict())
 
         # Buffer size dự tính được chọn sau các lần chạy trước đó
-        self.replay_buffer = ReplayBuffer(buffer_size=100000)
+        self.replay_buffer = ReplayBuffer(buffer_size=50000)
 
         self.criterion = nn.MSELoss()
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=lr)
         self.steplr = lr_scheduler.StepLR(optimizer=self.optimizer, step_size=1, gamma=0.9)
-
+        
         self.gamma = gamma
         self.epsilon = epsilon
         self.epsilon_min = epsilon_min
